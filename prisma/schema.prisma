@@ -1,0 +1,484 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                    String    @id @default(uuid())
+  name                  String?
+  email                 String    @unique
+  emailVerified         DateTime? @map("email_verified_at")
+  passwordHash          String?   @map("password_hash")
+  status                String    @default("pending_email_verification") // pending_email_verification | pending_approval | active | rejected | suspended
+  roleId                String?   @map("role_id")
+  twoFactorEnabled      Boolean   @default(false) @map("two_factor_enabled")
+  twoFactorSecret       String?   @map("two_factor_secret_encrypted")
+  
+  approvedByUserId      String?   @map("approved_by_user_id")
+  approvedAt            DateTime? @map("approved_at")
+  suspendedByUserId     String?   @map("suspended_by_user_id")
+  suspendedAt           DateTime? @map("suspended_at")
+  suspensionReason      String?   @map("suspension_reason")
+
+  lastLoginAt           DateTime? @map("last_login_at")
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+
+  // NextAuth relations
+  accounts              Account[]
+  sessions              Session[]
+
+  // Self relations
+  approvedBy            User?     @relation("ApprovedUsers", fields: [approvedByUserId], references: [id])
+  approvedUsers         User[]    @relation("ApprovedUsers")
+  
+  suspendedBy           User?     @relation("SuspendedUsers", fields: [suspendedByUserId], references: [id])
+  suspendedUsers        User[]    @relation("SuspendedUsers")
+
+  // Security & Devices
+  trustedDevices        TrustedDevice[]
+  Authenticator         Authenticator[]
+
+  // Personal CRM relations
+  vaultMemberships     VaultMembership[]
+  ownedVaults          Vault[]       @relation("VaultOwner")
+  contacts              Contact[]     @relation("UserContacts")
+  companies             Company[]     @relation("UserCompanies")
+  deals                 Deal[]        @relation("UserDeals")
+  activities            Activity[]    @relation("UserActivities")
+  notes                 ContactNote[] @relation("NoteAuthor")
+  tasks                 Task[]        @relation("TaskCreator")
+  assignedTasks         Task[]        @relation("TaskAssignee")
+  reminders             Reminder[]    @relation("ReminderCreator")
+  diaryEntries          DiaryEntry[]
+  uploadedFiles         Attachment[]  @relation("AttachmentUploader")
+
+  role                  Role?         @relation(fields: [roleId], references: [id])
+
+  @@map("users")
+  @@index([email])
+  @@index([status])
+}
+
+model Authenticator {
+  credentialID         String  @unique
+  userId               String  @map("user_id")
+  providerAccountId    String  @map("provider_account_id")
+  credentialPublicKey  String
+  counter              Int
+  credentialDeviceType String
+  credentialBackedUp   Boolean
+  transports           String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, credentialID])
+  @@map("authenticators")
+}
+
+model TrustedDevice {
+  id         String   @id @default(uuid())
+  userId     String   @map("user_id")
+  tokenHash  String   @unique @map("token_hash")
+  expiresAt  DateTime @map("expires_at")
+  userAgent  String?  @map("user_agent")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("trusted_devices")
+}
+
+model Account {
+  id                String  @id @default(uuid())
+  userId            String  @map("user_id")
+  type              String
+  provider          String
+  providerAccountId String  @map("provider_account_id")
+  refresh_token     String?  @map("refresh_token_encrypted")
+  access_token      String?  @map("access_token_encrypted")
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? 
+  session_state     String?
+  provider_email    String? @map("provider_email")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("oauth_accounts")
+}
+
+model Session {
+  id               String    @id @default(uuid())
+  sessionToken     String    @unique @map("token_hash")
+  userId           String    @map("user_id")
+  expires          DateTime  @map("expires_at")
+  lastActiveAt     DateTime? @map("last_active_at")
+  ipHash           String?   @map("ip_hash")
+  userAgent        String?   @map("user_agent")
+  twoFactorPending Boolean   @default(false) @map("two_factor_pending")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+  @@index([userId, expires])
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("email_verification_tokens")
+}
+
+model PasswordResetToken {
+  id         String   @id @default(uuid())
+  userId     String   @map("user_id")
+  tokenHash  String   @unique @map("token_hash")
+  expiresAt  DateTime @map("expires_at")
+  consumedAt DateTime? @map("consumed_at")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@map("password_reset_tokens")
+}
+
+model TwoFactorRecoveryCode {
+  id         String   @id @default(uuid())
+  userId     String   @map("user_id")
+  codeHash   String   @map("code_hash")
+  usedAt     DateTime? @map("used_at")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@map("two_factor_recovery_codes")
+}
+
+model Role {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  rank        Int      @unique
+  description String?
+
+  users       User[]
+  permissions RolePermission[]
+
+  @@map("roles")
+}
+
+model Permission {
+  id          String   @id @default(uuid())
+  key         String   @unique
+  description String?
+
+  roles       RolePermission[]
+
+  @@map("permissions")
+}
+
+model RolePermission {
+  roleId       String @map("role_id")
+  permissionId String @map("permission_id")
+
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+model UserPermissionOverride {
+  userId       String @map("user_id")
+  permissionId String @map("permission_id")
+  effect       String // "allow" | "deny"
+
+  @@id([userId, permissionId])
+  @@map("user_permission_overrides")
+}
+
+model AuditLog {
+  id           String   @id @default(uuid())
+  actorUserId  String?  @map("actor_user_id")
+  action       String
+  targetType   String   @map("target_type")
+  targetId     String?  @map("target_id")
+  metadataJson String?  @map("metadata_json")
+  ipHash       String?  @map("ip_hash")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@map("audit_logs")
+  @@index([targetId, createdAt])
+}
+
+model Company {
+  id           String   @id @default(uuid())
+  name         String
+  domain       String?
+  industry     String?
+  size         String?
+  address      String?
+  ownerUserId  String   @map("owner_user_id")
+  notes        String?
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  owner        User       @relation("UserCompanies", fields: [ownerUserId], references: [id])
+  contacts     Contact[]
+  deals        Deal[]
+  activities   Activity[]
+
+  @@map("companies")
+}
+
+model Contact {
+  id               String   @id @default(uuid())
+  firstName        String?  @map("first_name")
+  lastName         String?  @map("last_name")
+  email            String?
+  phone            String?
+  title            String?
+  companyId        String?  @map("company_id")
+  vaultId          String?  @map("vault_id")
+  ownerUserId      String   @map("owner_user_id")
+  lifecycleStatus  String?  @map("lifecycle_status")
+  source           String?
+  tagsJson         String?  @map("tags_json")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  owner        User       @relation("UserContacts", fields: [ownerUserId], references: [id])
+  company      Company?   @relation(fields: [companyId], references: [id])
+  vault        Vault?     @relation(fields: [vaultId], references: [id], onDelete: SetNull)
+  deals        Deal[]
+  activities   Activity[]
+  relationships          ContactRelationship[] @relation("ContactRelationships")
+  relatedToRelationships ContactRelationship[] @relation("RelatedContactRelationships")
+  notes                  ContactNote[]
+  tasks                  Task[]
+  reminders              Reminder[]
+  labels                 ContactLabel[]
+  attachments            Attachment[]
+
+  @@map("contacts")
+  @@index([vaultId])
+}
+
+model Deal {
+  id                String   @id @default(uuid())
+  title             String
+  companyId         String?  @map("company_id")
+  primaryContactId  String?  @map("primary_contact_id")
+  ownerUserId       String   @map("owner_user_id")
+  stage             String
+  amountDecimal     Float? @map("amount_decimal")
+  probability       Int?
+  expectedCloseDate DateTime? @map("expected_close_date")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  owner          User       @relation("UserDeals", fields: [ownerUserId], references: [id])
+  company        Company?   @relation(fields: [companyId], references: [id])
+  primaryContact Contact?   @relation(fields: [primaryContactId], references: [id])
+  activities     Activity[]
+
+  @@map("deals")
+  @@index([stage, ownerUserId])
+}
+
+model Activity {
+  id           String   @id @default(uuid())
+  type         String
+  body         String
+  authorUserId String   @map("author_user_id")
+  contactId    String?  @map("contact_id")
+  companyId    String?  @map("company_id")
+  dealId       String?  @map("deal_id")
+  occurredAt   DateTime @map("occurred_at")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  author   User     @relation("UserActivities", fields: [authorUserId], references: [id])
+  contact  Contact? @relation(fields: [contactId], references: [id])
+  company  Company? @relation(fields: [companyId], references: [id])
+  deal     Deal?    @relation(fields: [dealId], references: [id])
+
+  @@map("activities")
+}
+
+// Monica-style relationship CRM foundation. Existing sales CRM tables are kept
+// during the migration so current screens remain functional while the new
+// vault-based features are built.
+model Vault {
+  id          String            @id @default(uuid())
+  name        String
+  description String?
+  ownerUserId String            @map("owner_user_id")
+  createdAt   DateTime          @default(now()) @map("created_at")
+  updatedAt   DateTime          @updatedAt @map("updated_at")
+
+  owner       User              @relation("VaultOwner", fields: [ownerUserId], references: [id], onDelete: Cascade)
+  memberships VaultMembership[]
+  contacts    Contact[]
+  labels      Label[]
+  diaryEntries DiaryEntry[]
+  tasks       Task[]
+  reminders   Reminder[]
+  attachments Attachment[]
+
+  @@map("vaults")
+  @@index([ownerUserId])
+}
+
+model VaultMembership {
+  vaultId    String   @map("vault_id")
+  userId     String   @map("user_id")
+  role       String   @default("member") // owner | manager | member | viewer
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  vault      Vault    @relation(fields: [vaultId], references: [id], onDelete: Cascade)
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([vaultId, userId])
+  @@map("vault_memberships")
+  @@index([userId])
+}
+
+model ContactRelationship {
+  id                String   @id @default(uuid())
+  contactId         String   @map("contact_id")
+  relatedContactId  String   @map("related_contact_id")
+  relationshipType  String   @map("relationship_type")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  contact           Contact  @relation("ContactRelationships", fields: [contactId], references: [id], onDelete: Cascade)
+  relatedContact    Contact  @relation("RelatedContactRelationships", fields: [relatedContactId], references: [id], onDelete: Cascade)
+
+  @@unique([contactId, relatedContactId, relationshipType])
+  @@map("contact_relationships")
+}
+
+model ContactNote {
+  id           String   @id @default(uuid())
+  contactId    String   @map("contact_id")
+  authorUserId String   @map("author_user_id")
+  body         String
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  contact      Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  author       User     @relation("NoteAuthor", fields: [authorUserId], references: [id], onDelete: Cascade)
+
+  @@map("contact_notes")
+  @@index([contactId, createdAt])
+}
+
+model Task {
+  id             String    @id @default(uuid())
+  vaultId        String    @map("vault_id")
+  contactId      String?   @map("contact_id")
+  creatorUserId  String    @map("creator_user_id")
+  assigneeUserId String?   @map("assignee_user_id")
+  title          String
+  description    String?
+  dueAt          DateTime? @map("due_at")
+  completedAt    DateTime? @map("completed_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  vault          Vault     @relation(fields: [vaultId], references: [id], onDelete: Cascade)
+  contact        Contact?  @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  creator        User      @relation("TaskCreator", fields: [creatorUserId], references: [id], onDelete: Cascade)
+  assignee       User?     @relation("TaskAssignee", fields: [assigneeUserId], references: [id], onDelete: SetNull)
+
+  @@map("tasks")
+  @@index([vaultId, dueAt])
+  @@index([assigneeUserId, completedAt])
+}
+
+model Reminder {
+  id            String   @id @default(uuid())
+  vaultId       String   @map("vault_id")
+  contactId     String?  @map("contact_id")
+  creatorUserId String   @map("creator_user_id")
+  title         String
+  remindAt      DateTime @map("remind_at")
+  recurrence    String?  // none | yearly | monthly | custom
+  completedAt   DateTime? @map("completed_at")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  vault         Vault    @relation(fields: [vaultId], references: [id], onDelete: Cascade)
+  contact       Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  creator       User     @relation("ReminderCreator", fields: [creatorUserId], references: [id], onDelete: Cascade)
+
+  @@map("reminders")
+  @@index([vaultId, remindAt])
+}
+
+model DiaryEntry {
+  id          String   @id @default(uuid())
+  vaultId     String   @map("vault_id")
+  authorUserId String  @map("author_user_id")
+  entryDate   DateTime @map("entry_date")
+  title       String?
+  body        String
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  vault       Vault    @relation(fields: [vaultId], references: [id], onDelete: Cascade)
+  author      User     @relation(fields: [authorUserId], references: [id], onDelete: Cascade)
+
+  @@unique([vaultId, authorUserId, entryDate])
+  @@map("diary_entries")
+  @@index([vaultId, entryDate])
+}
+
+model Label {
+  id          String   @id @default(uuid())
+  vaultId     String   @map("vault_id")
+  name        String
+  color       String?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  vault       Vault    @relation(fields: [vaultId], references: [id], onDelete: Cascade)
+  contacts    ContactLabel[]
+
+  @@unique([vaultId, name])
+  @@map("labels")
+}
+
+model ContactLabel {
+  contactId String  @map("contact_id")
+  labelId   String  @map("label_id")
+
+  contact   Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  label     Label   @relation(fields: [labelId], references: [id], onDelete: Cascade)
+
+  @@id([contactId, labelId])
+  @@map("contact_labels")
+}
+
+model Attachment {
+  id             String   @id @default(uuid())
+  vaultId        String   @map("vault_id")
+  contactId      String?  @map("contact_id")
+  uploadedByUserId String @map("uploaded_by_user_id")
+  fileName       String   @map("file_name")
+  contentType    String   @map("content_type")
+  sizeBytes      Int      @map("size_bytes")
+  storageKey     String   @unique @map("storage_key")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  vault          Vault    @relation(fields: [vaultId], references: [id], onDelete: Cascade)
+  contact        Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  uploadedBy     User     @relation("AttachmentUploader", fields: [uploadedByUserId], references: [id], onDelete: Cascade)
+
+  @@map("attachments")
+  @@index([vaultId, createdAt])
+}
