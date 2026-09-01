@@ -13,7 +13,9 @@ export function middleware(request: NextRequest) {
   const isPublicPath = publicPaths.some(p => pathname.startsWith(p))
 
   if (!token && !isPublicPath) {
-    return NextResponse.redirect(new URL('/signin', request.url))
+    const url = request.nextUrl.clone()
+    url.pathname = '/signin'
+    return NextResponse.redirect(url)
   }
 
   // We rely on layout Server Components to do the deeper checks like user.status, 
